@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>소모품 재고조사 · 청주</title>
+<style>
+  :root{ --blue:#185FA5; --navy:#1F3864; --low:#C0392B; --line:#e2e6ea; --bg:#f4f6f9; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; font-family:"맑은 고딕","Malgun Gothic",system-ui,sans-serif; background:var(--bg); color:#222; }
+  header{ background:var(--navy); color:#fff; padding:16px; text-align:center; position:sticky; top:0; z-index:5; }
+  header h1{ margin:0; font-size:18px; } header .sub{ font-size:12px; opacity:.85; margin-top:3px; }
+  .wrap{ max-width:640px; margin:0 auto; padding:16px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:14px; }
+  label{ display:block; font-size:13px; font-weight:700; color:#444; margin:12px 0 6px; }
+  input[type=text], input[type=number]{ width:100%; padding:12px; font-size:16px; border:1px solid #ccd2d8; border-radius:9px; }
+  input[type=number]{ text-align:center; }
+  .btn{ display:block; width:100%; padding:15px; font-size:16px; font-weight:700; color:#fff; background:var(--blue); border:none; border-radius:11px; margin-top:16px; cursor:pointer; }
+  .btn:active{ opacity:.85; } .btn.gray{ background:#7a8794; }
+  .hidden{ display:none; }
+  .item{ display:flex; align-items:center; gap:10px; padding:11px 4px; border-bottom:1px solid #eef1f4; }
+  .item .info{ flex:1; min-width:0; }
+  .item .nm{ font-size:15px; font-weight:600; }
+  .item .meta{ font-size:12px; color:#8a929b; margin-top:2px; }
+  .item input{ width:78px; padding:10px; }
+  .bar{ position:sticky; bottom:0; background:#fff; border-top:1px solid var(--line); padding:12px 16px; }
+  .barrow{ display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#555; margin-bottom:8px; }
+  .search{ margin-bottom:8px; }
+  #toast{ position:fixed; left:50%; bottom:88px; transform:translateX(-50%); background:#333; color:#fff;
+          padding:11px 18px; border-radius:22px; font-size:14px; opacity:0; transition:.25s; pointer-events:none; z-index:20; white-space:nowrap; }
+  #toast.show{ opacity:.95; }
+  .done{ text-align:center; padding:40px 20px; }
+  .done .chk{ font-size:52px; } .done h2{ color:var(--blue); margin:10px 0; }
+  .spin{ text-align:center; color:#888; padding:30px; }
+  .low{ color:var(--low); font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <h1>소모품 재고조사</h1>
+  <div class="sub" id="brTag">지점코드를 입력하세요</div>
+</header>
+
+<!-- 1. 입장 화면 -->
+<div class="wrap" id="loginView">
+  <div class="card">
+    <label>조사자 이름</label>
+    <input type="text" id="userName" placeholder="예: 홍길동" autocomplete="off">
+    <label>지점코드</label>
+    <input type="text" id="branchCode" placeholder="지점코드 입력" inputmode="numeric" autocomplete="off">
+    <button class="btn" onclick="enter()">재고조사 시작</button>
+  </div>
+</div>
+
+<!-- 2. 재고조사 화면 -->
+<div class="wrap hidden" id="surveyView">
+  <div class="card">
+    <input class="search" type="text" id="search" placeholder="🔍 품목 검색" oninput="filterItems()">
+    <div id="itemList"><div class="spin">품목을 불러오는 중…</div></div>
+  </div>
+</div>
+<div class="bar hidden" id="bottomBar">
+  <div class="barrow"><span>입력한 품목 <b id="cntEntered">0</b>개</span><span id="userTag"></span></div>
+  <button class="btn" onclick="submitSurvey()" id="submitBtn">제출하기</button>
+</div>
+
+<!-- 3. 완료 화면 -->
+<div class="wrap hidden" id="doneView">
+  <div class="card done">
+    <div class="chk">✅</div>
+    <h2>제출 완료</h2>
+    <p id="doneMsg"></p>
+    <button class="btn gray" onclick="location.reload()">처음으로</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ===== 설정 =====
+var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw36UyluRS8RDC_0fMNwaRAdKS3l-eGLJ0R02RbcP8iv5sgLE7BB6TQvw_l9gFw_UvgPQ/exec";
+
+var ITEMS = [];          // {code,name,unit,safety}
+var USER = "", CODE = "";
+
+// ---- JSONP 호출 (CORS 회피) ----
+function jsonp(params, cb){
+  var name = "__cb_" + Date.now() + Math.floor(Math.random()*1000);
+  var s = document.createElement("script");
+  var done = false;
+  window[name] = function(res){ done = true; cleanup(); cb(res); };
+  function cleanup(){ delete window[name]; if(s.parentNode) s.parentNode.removeChild(s); }
+  params.callback = name;
+  var q = Object.keys(params).map(function(k){ return encodeURIComponent(k)+"="+encodeURIComponent(params[k]); }).join("&");
+  s.src = SCRIPT_URL + "?" + q;
+  s.onerror = function(){ if(!done){ cleanup(); cb({ok:false, error:"네트워크 오류 (인터넷/URL 확인)"}); } };
+  document.body.appendChild(s);
+  setTimeout(function(){ if(!done){ cleanup(); cb({ok:false, error:"응답 시간 초과"}); } }, 15000);
+}
+
+function toast(msg){
+  var t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2000);
+}
+
+// ---- 입장 : 코드로 지점 판별 + 품목 로드 ----
+function enter(){
+  USER = document.getElementById("userName").value.trim();
+  CODE = document.getElementById("branchCode").value.trim();
+  if(!USER){ toast("조사자 이름을 입력하세요"); return; }
+  if(!CODE){ toast("지점코드를 입력하세요"); return; }
+
+  var btn = document.querySelector("#loginView .btn");
+  btn.disabled = true; btn.textContent = "확인 중…";
+  // 코드를 서버에 보내 지점 판별 + 품목 수신
+  jsonp({ action:"items", code:CODE }, function(res){
+    btn.disabled = false; btn.textContent = "재고조사 시작";
+    if(!res.ok){ toast(res.error || "지점코드를 확인하세요"); return; }
+    ITEMS = res.items || [];
+    document.getElementById("loginView").classList.add("hidden");
+    document.getElementById("surveyView").classList.remove("hidden");
+    document.getElementById("bottomBar").classList.remove("hidden");
+    document.getElementById("brTag").textContent = (res.branch || "") + " 지점";
+    document.getElementById("userTag").textContent = USER + " 님";
+    renderItems();
+  });
+}
+
+function renderItems(){
+  var box = document.getElementById("itemList");
+  if(ITEMS.length === 0){ box.innerHTML = "<div class='spin'>품목이 없습니다</div>"; return; }
+  var html = "";
+  ITEMS.forEach(function(it, i){
+    var safe = (it.safety === "" || it.safety == null) ? "" : " · 안전 " + it.safety;
+    html += '<div class="item" data-name="'+it.name+'">'
+          +   '<div class="info"><div class="nm">'+it.name+'</div>'
+          +   '<div class="meta">'+it.code+' · '+it.unit+safe+'</div></div>'
+          +   '<input type="number" min="0" inputmode="numeric" data-code="'+it.code+'" '
+          +          'oninput="updateCount()" placeholder="0"></div>';
+  });
+  box.innerHTML = html;
+}
+
+function filterItems(){
+  var q = document.getElementById("search").value.trim().toLowerCase();
+  document.querySelectorAll("#itemList .item").forEach(function(el){
+    var nm = (el.getAttribute("data-name")||"").toLowerCase();
+    el.style.display = (!q || nm.indexOf(q) >= 0) ? "" : "none";
+  });
+}
+
+function updateCount(){
+  var n = 0;
+  document.querySelectorAll('#itemList input[data-code]').forEach(function(inp){
+    if(inp.value !== "" && !isNaN(Number(inp.value))) n++;
+  });
+  document.getElementById("cntEntered").textContent = n;
+}
+
+// ---- 제출 ----
+function submitSurvey(){
+  var parts = [];
+  document.querySelectorAll('#itemList input[data-code]').forEach(function(inp){
+    if(inp.value !== "" && !isNaN(Number(inp.value))){
+      parts.push(inp.getAttribute("data-code") + ":" + Number(inp.value));
+    }
+  });
+  if(parts.length === 0){ toast("입력한 수량이 없습니다"); return; }
+  if(!confirm(parts.length + "개 품목을 제출할까요?")) return;
+
+  var btn = document.getElementById("submitBtn");
+  btn.disabled = true; btn.textContent = "제출 중…";
+  jsonp({ action:"submit", code:CODE, user:USER, data:parts.join("|") }, function(res){
+    btn.disabled = false; btn.textContent = "제출하기";
+    if(!res.ok){ toast(res.error || "제출 실패"); return; }
+    document.getElementById("surveyView").classList.add("hidden");
+    document.getElementById("bottomBar").classList.add("hidden");
+    document.getElementById("doneView").classList.remove("hidden");
+    document.getElementById("doneMsg").textContent = res.saved + "개 품목이 저장되었습니다.";
+  });
+}
+</script>
+</body>
+</html>
